@@ -1,0 +1,40 @@
+# Dockerfile for building Windows .exe
+# NOTE: This requires a Windows container runtime (Windows host or special setup)
+# For Linux hosts, use GitHub Actions instead (see README)
+
+# Use Windows Server Core as base
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Install Chocolatey
+RUN powershell -Command \
+    Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Install Node.js, Rust, and Visual Studio Build Tools via Chocolatey
+RUN choco install -y nodejs-lts rust visualstudio2022buildtools --params "--add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+
+# Set environment variables
+ENV PATH="C:\Program Files\nodejs;C:\Users\ContainerAdministrator\.cargo\bin;${PATH}"
+
+# Set working directory
+WORKDIR C:\app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+COPY vite.config.ts ./
+
+# Install npm dependencies
+RUN npm ci
+
+# Copy source files
+COPY src ./src
+COPY src-tauri ./src-tauri
+COPY scripts ./scripts
+COPY index.html ./
+
+# Build the application
+RUN npm run tauri:build:windows
+
+# Output will be in src-tauri/target/release/bundle/portable/

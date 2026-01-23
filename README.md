@@ -60,8 +60,13 @@ A desktop application for analyzing disk space usage. Scan folders and mounted n
 
    **For Ubuntu/Debian:**
    ```bash
+   # Use the provided script (recommended)
+   bash scripts/install-ubuntu-deps.sh
+   
+   # Or install manually:
    sudo apt-get update
    sudo apt-get install -y \
+     gcc g++ make pkg-config \
      libwebkit2gtk-4.1-dev \
      build-essential \
      curl \
@@ -70,7 +75,12 @@ A desktop application for analyzing disk space usage. Scan folders and mounted n
      libssl-dev \
      libgtk-3-dev \
      libayatana-appindicator3-dev \
-     librsvg2-dev
+     librsvg2-dev \
+     libglib2.0-dev \
+     libcairo2-dev \
+     libpango1.0-dev \
+     libgdk-pixbuf2.0-dev \
+     libatk1.0-dev
    ```
 
    **For macOS:**
@@ -102,7 +112,19 @@ A desktop application for analyzing disk space usage. Scan folders and mounted n
 
 1. **Follow steps 1-4 from Option 1**
 
-2. **Build the application**
+2. **Install system dependencies (if not already done)**
+   
+   **For Ubuntu/Debian:**
+   ```bash
+   bash scripts/install-ubuntu-deps.sh
+   ```
+   
+   **For Fedora/RHEL:**
+   ```bash
+   bash scripts/install-fedora-deps.sh
+   ```
+
+3. **Build the application**
    ```bash
    # For your current platform
    bash scripts/build-portable.sh
@@ -211,6 +233,99 @@ Follow these steps to build a portable Windows `.exe` file that can run without 
 
 **Note:** The first build may take 10-30 minutes as it compiles Rust dependencies. Subsequent builds will be much faster.
 
+### Option 4: Build Using Podman/Docker Containers
+
+Using containers isolates the build environment and ensures consistent builds across different systems.
+
+**Prerequisites:**
+- Install Podman or Docker:
+  ```bash
+  # Ubuntu/Debian
+  sudo apt-get install -y podman  # or docker.io
+  
+  # Fedora/RHEL
+  sudo dnf install -y podman  # or docker
+  ```
+
+**Build Linux AppImage:**
+```bash
+# Using volume mounts (recommended - faster, preserves build cache)
+bash scripts/build-with-podman-volume.sh linux
+
+# Or using full container build
+bash scripts/build-with-podman.sh linux
+```
+
+**Build Windows .exe (requires Windows host):**
+```bash
+# NOTE: Windows containers only work on Windows hosts
+# For Linux hosts, use GitHub Actions instead (see below)
+bash scripts/build-with-podman.sh windows
+```
+
+**Manual container build:**
+```bash
+# Build Linux
+podman build -f Dockerfile.linux -t space-usage-builder:linux .
+podman run --rm -v "$(pwd):/app" -w /app space-usage-builder:linux \
+  bash -c ". \$HOME/.cargo/env && npm run tauri:build:linux"
+
+# Output: src-tauri/target/release/bundle/appimage/*.AppImage
+```
+
+**Benefits of container builds:**
+- ✅ Isolated build environment
+- ✅ No need to install system dependencies on host
+- ✅ Reproducible builds
+- ✅ Works on any Linux distribution
+- ✅ Can cache container layers for faster rebuilds
+
+### Building Windows .exe from Linux (Cross-Compilation)
+
+**Short answer: Not recommended, and likely won't work.**
+
+Tauri requires Windows-specific components (like WebView2) that cannot be easily cross-compiled from Linux. However, you have several alternatives:
+
+**Option 1: Build on Windows (Recommended)**
+- Use a Windows machine or VM
+- Follow the "Option 3: Build Windows Portable Executable" steps above
+- Run `.\scripts\build-portable.ps1` on Windows
+
+**Option 2: Use GitHub Actions CI/CD (Best for automation)**
+Create `.github/workflows/build.yml`:
+```yaml
+name: Build
+on: [push, pull_request]
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install dependencies
+        run: npm install
+      - name: Build Windows executable
+        run: npm run tauri:build:windows
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-exe
+          path: src-tauri/target/release/bundle/portable/*.exe
+```
+
+**Option 3: Attempt Cross-Compilation (Experimental)**
+If you want to try anyway (will likely fail):
+```bash
+bash scripts/build-windows-from-linux.sh
+```
+This installs mingw-w64 and attempts cross-compilation, but Tauri's Windows WebView2 dependency will likely cause it to fail.
+
 ## Usage
 
 ### Starting a Scan
@@ -278,13 +393,60 @@ Follow these steps to build a portable Windows `.exe` file that can run without 
 
 ### Build Errors
 
+**"Cannot find module './main'" or Tauri CLI errors**
+- This usually indicates corrupted `node_modules`. Fix by:
+  ```bash
+  rm -rf node_modules package-lock.json
+  npm install
+  ```
+
+**"rustup could not choose a version of cargo" or "no default toolchain"**
+- Rust is installed but no default toolchain is set. Fix by:
+  ```bash
+  rustup default stable
+  ```
+- If Rust is not installed, install it first:
+  ```bash
+  bash scripts/install-rust.sh
+  # Then set default:
+  rustup default stable
+  ```
+
 **"cargo: command not found"**
 - Install Rust: `bash scripts/install-rust.sh`
 - Restart your terminal or run `source $HOME/.cargo/env`
+- Set default toolchain: `rustup default stable`
 
-**Linux: Missing GTK/WebKit libraries**
-- Fedora: Run `bash scripts/install-fedora-deps.sh`
-- Ubuntu/Debian: Install packages listed in Installation section
+**Linux: Missing GTK/WebKit libraries (pkg-config errors for glib-2.0, gdk-3.0, cairo, etc.)**
+- **Ubuntu/Debian:**
+  ```bash
+  # Use the provided script (recommended)
+  bash scripts/install-ubuntu-deps.sh
+  
+  # Or install manually:
+  sudo apt-get update
+  sudo apt-get install -y \
+    gcc g++ make pkg-config \
+    libwebkit2gtk-4.1-dev \
+    build-essential \
+    curl \
+    wget \
+    file \
+    libssl-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev \
+    libglib2.0-dev \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libgdk-pixbuf2.0-dev \
+    libatk1.0-dev
+  ```
+- **Fedora/RHEL:** Run `bash scripts/install-fedora-deps.sh`
+- Verify installation:
+  ```bash
+  pkg-config --exists gtk+-3.0 webkit2gtk-4.1 glib-2.0 cairo && echo "OK" || echo "Missing dependencies"
+  ```
 
 **macOS: "xcrun: error: invalid active developer path"**
 - Run: `xcode-select --install`
